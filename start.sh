@@ -63,6 +63,15 @@ export FORGEJO__server__HTTP_PORT="3000"
 export FORGEJO__server__HTTP_ADDR="0.0.0.0"
 export FORGEJO__server__DISABLE_SSH="true"
 
+# Reverse proxy: trust X-Forwarded-* headers from the OpenHost router.
+# The router connects from the Docker bridge network (not 127.0.0.1), so
+# the default trusted proxies (127.0.0.0/8) won't match. Without this,
+# Forgejo ignores X-Forwarded-Host and sees the container's internal Host
+# header, causing CSRF "cross-origin request detected" errors on POSTs.
+export FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES="*"
+export FORGEJO__server__REVERSE_PROXY_LIMIT="1"
+export FORGEJO__server__REVERSE_PROXY_TRUSTED_PROXIES="*"
+
 export FORGEJO__database__DB_TYPE="sqlite3"
 
 export FORGEJO__security__SECRET_KEY="$SECRET_KEY"
