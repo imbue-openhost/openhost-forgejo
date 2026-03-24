@@ -59,18 +59,11 @@ fi
 export FORGEJO__DEFAULT__APP_NAME="Forgejo"
 export FORGEJO__server__DOMAIN="$DOMAIN_NAME"
 export FORGEJO__server__ROOT_URL="$ROOT_URL"
-export FORGEJO__server__HTTP_PORT="3000"
+# Forgejo listens on 3001 internally; Caddy on 3000 rewrites the Host
+# header from X-Forwarded-Host so Forgejo's CSRF check passes.
+export FORGEJO__server__HTTP_PORT="3001"
 export FORGEJO__server__HTTP_ADDR="0.0.0.0"
 export FORGEJO__server__DISABLE_SSH="true"
-
-# Reverse proxy: trust X-Forwarded-* headers from the OpenHost router.
-# The router connects from the Docker bridge network (not 127.0.0.1), so
-# the default trusted proxies (127.0.0.0/8) won't match. Without this,
-# Forgejo ignores X-Forwarded-Host and sees the container's internal Host
-# header, causing CSRF "cross-origin request detected" errors on POSTs.
-export FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES="*"
-export FORGEJO__server__REVERSE_PROXY_LIMIT="1"
-export FORGEJO__server__REVERSE_PROXY_TRUSTED_PROXIES="*"
 
 export FORGEJO__database__DB_TYPE="sqlite3"
 
@@ -81,6 +74,10 @@ export FORGEJO__service__DISABLE_REGISTRATION="false"
 export FORGEJO__service__REQUIRE_SIGNIN_VIEW="false"
 
 export FORGEJO__log__LEVEL="Info"
+
+# Start Caddy in background — it rewrites Host from X-Forwarded-Host on
+# port 3000, then proxies to Forgejo on port 3001.
+caddy run --config /app/Caddyfile &
 
 # Hand off to the official entrypoint (handles user setup, s6, etc.)
 exec /usr/bin/entrypoint
