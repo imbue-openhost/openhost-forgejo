@@ -21,11 +21,25 @@ if [ "$PERSIST" != "/data" ]; then
     chown -R git:git "$PERSIST"
 fi
 
-# Derive domain from OpenHost environment
+# Derive domain and ROOT_URL from OpenHost environment.
+# OPENHOST_ROUTER_URL (e.g. http://host.docker.internal:8080) tells us the
+# router's port. If it's on 80/443, we're behind TLS in production and use
+# https without a port. Otherwise (dev), we use http with the explicit port.
 if [ -n "$OPENHOST_ZONE_DOMAIN" ]; then
     APP_SUBDOMAIN="${OPENHOST_APP_NAME:-forgejo}"
     DOMAIN_NAME="${APP_SUBDOMAIN}.${OPENHOST_ZONE_DOMAIN}"
-    ROOT_URL="https://${DOMAIN_NAME}/"
+
+    ROUTER_PORT=""
+    if [ -n "$OPENHOST_ROUTER_URL" ]; then
+        # Extract port from e.g. http://host.docker.internal:8080
+        ROUTER_PORT=$(echo "$OPENHOST_ROUTER_URL" | sed -n 's/.*:\([0-9]*\)$/\1/p')
+    fi
+
+    if [ "$ROUTER_PORT" = "443" ] || [ "$ROUTER_PORT" = "80" ] || [ -z "$ROUTER_PORT" ]; then
+        ROOT_URL="https://${DOMAIN_NAME}/"
+    else
+        ROOT_URL="http://${DOMAIN_NAME}:${ROUTER_PORT}/"
+    fi
 else
     DOMAIN_NAME="${DOMAIN_NAME:-localhost}"
     ROOT_URL="http://${DOMAIN_NAME}:3000/"
