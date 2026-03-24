@@ -22,24 +22,26 @@ if [ "$PERSIST" != "/data" ]; then
 fi
 
 # Derive domain and ROOT_URL from OpenHost environment.
-# OPENHOST_ROUTER_URL (e.g. http://host.docker.internal:8080) tells us the
-# router's port. If it's on 80/443, we're behind TLS in production and use
-# https without a port. Otherwise (dev), we use http with the explicit port.
+# In production, the router terminates TLS and the app is at https://<subdomain>.<zone>.
+# In dev (lvh.me), there's no TLS and the router exposes on a non-standard port.
 if [ -n "$OPENHOST_ZONE_DOMAIN" ]; then
     APP_SUBDOMAIN="${OPENHOST_APP_NAME:-forgejo}"
     DOMAIN_NAME="${APP_SUBDOMAIN}.${OPENHOST_ZONE_DOMAIN}"
 
-    ROUTER_PORT=""
-    if [ -n "$OPENHOST_ROUTER_URL" ]; then
-        # Extract port from e.g. http://host.docker.internal:8080
-        ROUTER_PORT=$(echo "$OPENHOST_ROUTER_URL" | sed -n 's/.*:\([0-9]*\)$/\1/p')
-    fi
-
-    if [ "$ROUTER_PORT" = "443" ] || [ "$ROUTER_PORT" = "80" ] || [ -z "$ROUTER_PORT" ]; then
-        ROOT_URL="https://${DOMAIN_NAME}/"
-    else
-        ROOT_URL="http://${DOMAIN_NAME}:${ROUTER_PORT}/"
-    fi
+    case "$OPENHOST_ZONE_DOMAIN" in
+        lvh.me|*.lvh.me|localhost|*.localhost)
+            # Dev environment — use http with the router's external port
+            ROUTER_PORT=""
+            if [ -n "$OPENHOST_ROUTER_URL" ]; then
+                ROUTER_PORT=$(echo "$OPENHOST_ROUTER_URL" | sed -n 's/.*:\([0-9]*\)$/\1/p')
+            fi
+            ROOT_URL="http://${DOMAIN_NAME}${ROUTER_PORT:+:$ROUTER_PORT}/"
+            ;;
+        *)
+            # Production — HTTPS on standard port
+            ROOT_URL="https://${DOMAIN_NAME}/"
+            ;;
+    esac
 else
     DOMAIN_NAME="${DOMAIN_NAME:-localhost}"
     ROOT_URL="http://${DOMAIN_NAME}:3000/"
