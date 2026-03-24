@@ -1,0 +1,18 @@
+[app]
+name = "forgejo"
+version = "0.1.0"
+description = "Forgejo code hosting - lightweight self-hosted Git forge"
+
+[runtime.container]
+image = "Dockerfile"
+port = 3000
+
+[routing]
+public_paths = ["/"]
+
+[resources]
+memory_mb = 512
+cpu_millicores = 500
+
+[data]
+app_data = true
