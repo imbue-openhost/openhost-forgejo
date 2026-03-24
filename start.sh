@@ -16,6 +16,9 @@ if [ "$PERSIST" != "/data" ]; then
         rm -rf "$link"
         ln -sf "$target" "$link"
     done
+    # The entrypoint's chown on symlinks doesn't reach the targets,
+    # so we must fix ownership on the actual persistent directories.
+    chown -R git:git "$PERSIST"
 fi
 
 # Derive domain from OpenHost environment
