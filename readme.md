@@ -11,7 +11,9 @@ On first boot, the container:
 2. Generates and persists a secret key
 3. Configures Forgejo with the correct domain derived from OpenHost environment variables
 4. Starts Forgejo with install lock enabled (no manual setup wizard)
-5. Bootstraps an `admin` account with a random password and writes the credentials to `$OPENHOST_APP_DATA_DIR/admin-password.txt`
+5. Bootstraps an `operator` admin account with a random password and writes the credentials to `$OPENHOST_APP_DATA_DIR/admin-password.txt`
+
+(Forgejo reserves the username `admin` internally, so the default is `operator`. Override via `FORGEJO_ADMIN_USERNAME` if you want something else.)
 
 Public signups are **disabled** by design. The admin adds other users from the Site Administration panel (see "Adding users" below).
 
@@ -27,11 +29,11 @@ Once the container is running, grab the admin password from inside the data dir.
 sudo cat /home/host/.openhost/local_compute_space/persistent_data/app_data/forgejo/admin-password.txt
 ```
 
-Or use the OpenHost file-browser app. Log in as `admin` with the password, go to your user settings, change it to something you'll remember, and delete the file.
+Or use the OpenHost file-browser app. Log in as `operator` with the password, go to your user settings, change it to something you'll remember, and delete the file.
 
 To customise the bootstrap username or email, set these env vars before first boot (the OpenHost way is via the app's environment config):
 
-- `FORGEJO_ADMIN_USERNAME` (default: `admin`)
+- `FORGEJO_ADMIN_USERNAME` (default: `operator`)
 - `FORGEJO_ADMIN_EMAIL` (default: `admin@{domain}`)
 
 Once the bootstrap runs, a sentinel file (`.admin_bootstrapped`) is written to prevent re-bootstrap. Changing the env vars afterwards has no effect.
