@@ -106,7 +106,8 @@ export FORGEJO__log__LEVEL="Info"
 # for the `operator` user. Non-owner traffic falls through to
 # Forgejo's normal session/password auth.
 # ---------------------------------------------------------------------------
-python3 /app/auth_proxy.py &
+# Use the venv-installed python so PyJWT + requests are on the path.
+/opt/auth-venv/bin/python /app/auth_proxy.py &
 AUTH_PROXY_PID=$!
 
 # Hand off to the official entrypoint (handles s6 startup,
