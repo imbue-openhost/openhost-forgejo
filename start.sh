@@ -118,14 +118,24 @@ if [ ! -f "$ADMIN_BOOTSTRAP_SENTINEL" ]; then
         exit 1
     fi
 
-    # Apply the schema + create the user as the forgejo runtime
-    # user ('git') so file paths and ownership match what the
-    # official entrypoint later expects. Both commands are
-    # idempotent-ish on re-run (migrate no-ops if up-to-date;
-    # user create errors if the name exists), but we only run
-    # them when the sentinel is absent.
+    # The gitea CLI commands need an app.ini on disk. Normally that
+    # file is written by /etc/s6/gitea/setup on service startup, but
+    # we run before the s6 tree comes up, so we invoke setup
+    # manually. It's idempotent — on second boot the app.ini check
+    # skips the template step and just re-applies env overrides.
     BOOTSTRAP_LOG="$PERSIST/admin-bootstrap.log"
     : > "$BOOTSTRAP_LOG"
+
+    if ! (cd /etc/s6/gitea && . ./setup) >>"$BOOTSTRAP_LOG" 2>&1; then
+        echo "[openhost-forgejo] WARNING: initial app.ini setup failed — see $BOOTSTRAP_LOG" >&2
+    fi
+
+    # Apply the schema + create the user as the forgejo runtime
+    # user ('git') so file paths and ownership match what the
+    # official entrypoint later expects. Both commands are safe to
+    # re-run (migrate no-ops if up-to-date), and we only run the
+    # 'user create' when the sentinel is absent so we don't clobber
+    # an existing operator account.
     bootstrap_ok=0
     if su git -s /bin/sh -c "gitea migrate" \
         >>"$BOOTSTRAP_LOG" 2>&1 \
