@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+# Bash specifically (not /bin/sh): we use `wait -n`, which busybox
+# ash (Alpine's default /bin/sh) doesn't implement. The Forgejo
+# Dockerfile installs bash for us.
 set -e
 
 # OpenHost mounts persistent storage at OPENHOST_APP_DATA_DIR.
@@ -56,30 +59,80 @@ else
     echo -n "$SECRET_KEY" > "$SECRET_KEY_FILE"
 fi
 
-# Configure Forgejo via environment variables (applied by environment-to-ini)
+# ---------------------------------------------------------------------------
+# Forgejo configuration via env vars (consumed by environment-to-ini).
 # See: https://forgejo.org/docs/latest/admin/config-cheat-sheet/
+# ---------------------------------------------------------------------------
 export FORGEJO__DEFAULT__APP_NAME="Forgejo"
 export FORGEJO__server__DOMAIN="$DOMAIN_NAME"
 export FORGEJO__server__ROOT_URL="$ROOT_URL"
-# Forgejo listens on 3001 internally; Caddy on 3000 rewrites the Host
-# header from X-Forwarded-Host so Forgejo's CSRF check passes.
+# Forgejo listens on 3001 internally. The Python auth_proxy.py
+# sidecar (started below) is what binds 0.0.0.0:3000, terminating
+# the OpenHost router's connection and forwarding to Forgejo with
+# (a) Host rewritten from X-Forwarded-Host (so CSRF passes) and
+# (b) X-Openhost-User stamped if the visitor is the OpenHost owner.
 export FORGEJO__server__HTTP_PORT="3001"
-export FORGEJO__server__HTTP_ADDR="0.0.0.0"
+export FORGEJO__server__HTTP_ADDR="127.0.0.1"
 export FORGEJO__server__DISABLE_SSH="true"
 
 export FORGEJO__database__DB_TYPE="sqlite3"
 
 export FORGEJO__security__SECRET_KEY="$SECRET_KEY"
 export FORGEJO__security__INSTALL_LOCK="true"
+# Trust only the auth-proxy sidecar (running on loopback inside the
+# same container) to set X-Openhost-User. Anyone else's header
+# claim is ignored — Forgejo treats the request as anonymous.
+export FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES="127.0.0.1/32"
+export FORGEJO__security__REVERSE_PROXY_AUTHENTICATION_USER="X-Openhost-User"
 
-export FORGEJO__service__DISABLE_REGISTRATION="false"
+# Walk-in registrations at /user/sign_up are blocked: visitors who
+# don't already hold an account can't make one without an admin
+# explicitly creating it. Reverse-proxy auto-registration is on,
+# but that path only fires for requests carrying a valid (signed)
+# X-Openhost-User header — i.e. the OpenHost owner.
+export FORGEJO__service__DISABLE_REGISTRATION="true"
 export FORGEJO__service__REQUIRE_SIGNIN_VIEW="false"
+export FORGEJO__service__ENABLE_REVERSE_PROXY_AUTHENTICATION="true"
+export FORGEJO__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION="true"
 
 export FORGEJO__log__LEVEL="Info"
 
-# Start Caddy in background — it rewrites Host from X-Forwarded-Host on
-# port 3000, then proxies to Forgejo on port 3001.
-caddy run --config /app/Caddyfile &
+# ---------------------------------------------------------------------------
+# Start the auth-proxy sidecar.
+# The proxy verifies the visitor's `zone_auth` JWT cookie against the
+# OpenHost router's JWKS and, on `sub == "owner"`, stamps
+# `X-Openhost-User: operator` on the upstream request to Forgejo.
+# Forgejo, configured above, treats that as an authenticated session
+# for the `operator` user. Non-owner traffic falls through to
+# Forgejo's normal session/password auth.
+# ---------------------------------------------------------------------------
+# Use the venv-installed python so PyJWT + requests are on the path.
+/opt/auth-venv/bin/python /app/auth_proxy.py &
+AUTH_PROXY_PID=$!
 
-# Hand off to the official entrypoint (handles user setup, s6, etc.)
-exec /usr/bin/entrypoint
+# Hand off to the official entrypoint (handles s6 startup,
+# environment-to-ini, the gitea web server) as a sibling background
+# process. If either dies, the wait/trap logic below tears the
+# container down so OpenHost notices and restarts us.
+/usr/bin/entrypoint &
+ENTRYPOINT_PID=$!
+
+# Forward SIGTERM/SIGINT to BOTH children so a `docker stop` /
+# OpenHost stop signal lets Forgejo's s6 supervisor flush the DB
+# cleanly instead of leaving the proxy running by itself.
+trap 'kill -TERM "$AUTH_PROXY_PID" "$ENTRYPOINT_PID" 2>/dev/null; wait' TERM INT
+
+# Block until either child exits, then tear down the survivor.
+# `wait -n` is a bash builtin and returns as soon as any
+# backgrounded job exits. Disable errexit around it because a
+# non-zero child exit (or signal-driven exit) would otherwise
+# abort the script before the explicit cleanup runs.
+set +e
+wait -n "$AUTH_PROXY_PID" "$ENTRYPOINT_PID"
+EXIT_CODE=$?
+set -e
+
+echo "[start.sh] child exited (code=$EXIT_CODE); shutting down" >&2
+kill -TERM "$AUTH_PROXY_PID" "$ENTRYPOINT_PID" 2>/dev/null || true
+wait || true
+exit "$EXIT_CODE"

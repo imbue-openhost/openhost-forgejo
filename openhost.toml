@@ -1,13 +1,19 @@
 [app]
 name = "forgejo"
-version = "0.1.0"
-description = "Forgejo code hosting - lightweight self-hosted Git forge"
+version = "0.2.0"
+description = "Forgejo code hosting with OpenHost SSO admin and password auth for invited users"
 
 [runtime.container]
 image = "Dockerfile"
 port = 3000
 
 [routing]
+health_check = "/api/healthz"
+# Public so anonymous users can reach the login page (invited users
+# log in with Forgejo-local passwords). The auth-proxy sidecar
+# verifies the OpenHost zone_auth cookie itself and stamps an
+# X-Openhost-User header for the OpenHost owner; everyone else gets
+# Forgejo's normal session/password auth.
 public_paths = ["/"]
 
 [resources]
