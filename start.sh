@@ -24,6 +24,47 @@ if [ "$PERSIST" != "/data" ]; then
     chown -R git:git "$PERSIST"
 fi
 
+# Per-deployment env overrides.  OpenHost has no per-app env-var API;
+# this is the workaround pattern: drop a file at $PERSIST/openhost.env
+# and we source it on every boot.  Lines are KEY=value (shell
+# syntax).  Used today for OPENHOST_HAIRPIN_HOSTS; can hold any
+# Forgejo or app-level env vars going forward.
+if [ -f "$PERSIST/openhost.env" ]; then
+    echo "[start.sh] sourcing $PERSIST/openhost.env"
+    set -a
+    # shellcheck disable=SC1091
+    . "$PERSIST/openhost.env"
+    set +a
+fi
+
+# Hairpin workaround.  Outbound HTTP from this container to a sibling
+# OpenHost app on the same zone (typical case: webhooks targeting
+# https://drone.<zone>) tries to dial the host's public IP, but
+# rootless podman + slirp4netns won't NAT-loop the packet back to
+# the same host's Caddy.  Symptom: webhook deliveries fail with
+# 'connection refused' or time out.
+#
+# Fix: pin sibling-app hostnames to host.containers.internal in
+# /etc/hosts.  The operator opts in by setting OPENHOST_HAIRPIN_HOSTS
+# to a comma- or space-separated list of FQDNs (e.g.
+# 'drone.andrew-1.selfhost.imbue.com').  Caddy listens on
+# 0.0.0.0:443 so it answers on the gateway IP too; TLS validates
+# fine because the request hostname is unchanged.
+if [ -n "${OPENHOST_HAIRPIN_HOSTS:-}" ]; then
+    GATEWAY_IP=$(getent hosts host.containers.internal 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$GATEWAY_IP" ]; then
+        for HOST in $(echo "$OPENHOST_HAIRPIN_HOSTS" | tr ',' ' '); do
+            [ -z "$HOST" ] && continue
+            if ! grep -qF " $HOST" /etc/hosts; then
+                echo "$GATEWAY_IP $HOST" >> /etc/hosts
+                echo "[start.sh] pinned $HOST to $GATEWAY_IP in /etc/hosts (hairpin workaround)"
+            fi
+        done
+    else
+        echo "[start.sh] WARNING: OPENHOST_HAIRPIN_HOSTS set but host.containers.internal did not resolve" >&2
+    fi
+fi
+
 # Derive domain and ROOT_URL from OpenHost environment.
 # In production, the router terminates TLS and the app is at https://<subdomain>.<zone>.
 # In dev (lvh.me), there's no TLS and the router exposes on a non-standard port.
