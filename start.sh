@@ -138,6 +138,30 @@ export FORGEJO__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION="true"
 
 export FORGEJO__log__LEVEL="Info"
 
+# Webhook delivery allow-list.  Forgejo's default ALLOWED_HOST_LIST
+# is 'external' which blocks RFC1918 / loopback targets.  Sibling
+# OpenHost apps on the same zone are reached via the hairpin
+# workaround above (host.containers.internal, in 172.16.0.0/12),
+# so by default Forgejo refuses to deliver webhooks to them with
+# 'webhook can only call allowed HTTP servers'.
+#
+# We allow:
+#   * '*.${OPENHOST_ZONE_DOMAIN}' so any sibling app on this zone
+#     is reachable as a webhook target.
+#   * 'private' (RFC1918 ranges) so the hairpin gateway IP itself
+#     is allowed once /etc/hosts pins resolve there.
+#   * 'external' to preserve the default allow for public IPs.
+# Operators can override by exporting FORGEJO__webhook__ALLOWED_HOST_LIST
+# from $PERSIST/openhost.env before this point — the export below
+# is a no-op if the variable is already set in the environment.
+if [ -z "${FORGEJO__webhook__ALLOWED_HOST_LIST:-}" ]; then
+    if [ -n "$OPENHOST_ZONE_DOMAIN" ]; then
+        export FORGEJO__webhook__ALLOWED_HOST_LIST="*.${OPENHOST_ZONE_DOMAIN},private,external"
+    else
+        export FORGEJO__webhook__ALLOWED_HOST_LIST="private,external"
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # Start the auth-proxy sidecar.
 # The proxy verifies the visitor's `zone_auth` JWT cookie against the
