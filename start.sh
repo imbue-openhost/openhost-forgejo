@@ -164,15 +164,14 @@ fi
 
 # ---------------------------------------------------------------------------
 # Start the auth-proxy sidecar.
-# The proxy verifies the visitor's `zone_auth` JWT cookie against the
-# OpenHost router's JWKS and, on `sub == "owner"`, stamps
-# `X-Openhost-User: operator` on the upstream request to Forgejo.
-# Forgejo, configured above, treats that as an authenticated session
-# for the `operator` user. Non-owner traffic falls through to
-# Forgejo's normal session/password auth.
+# The proxy reads the router-stamped `X-OpenHost-Is-Owner: true`
+# header and, when present, adds `X-Openhost-User: operator` so
+# Forgejo's reverse-proxy auth recognises the visitor as the admin.
+# Non-owner traffic falls through to Forgejo's normal session/password
+# auth.
 # ---------------------------------------------------------------------------
-# Use the venv-installed python so PyJWT + requests are on the path.
-/opt/auth-venv/bin/python /app/auth_proxy.py &
+# The auth proxy uses only stdlib modules (no venv needed).
+python3 /app/auth_proxy.py &
 AUTH_PROXY_PID=$!
 
 # Hand off to the official entrypoint (handles s6 startup,

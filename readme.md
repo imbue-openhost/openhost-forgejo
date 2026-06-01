@@ -11,13 +11,13 @@ browsable without login (`REQUIRE_SIGNIN_VIEW=false`).
 
 The container runs two processes side by side:
 
-1. **`auth_proxy.py`** binds the public port (3000) and is what the OpenHost router talks to. It reads the visitor's `zone_auth` JWT cookie (set by the OpenHost router on owner login), verifies the signature against the router's JWKS at `<router>/.well-known/jwks.json`, and on `sub == "owner"` stamps an `X-Openhost-User: operator` header on the upstream request. It also rewrites the `Host` header from `X-Forwarded-Host` so Forgejo's CSRF check sees the right origin.
+1. **`auth_proxy.py`** binds the public port (3000) and is what the OpenHost router talks to. When the router stamps `X-OpenHost-Is-Owner: true` on the request (meaning the visitor holds a valid session), the proxy adds an `X-Openhost-User: operator` header on the upstream request to Forgejo. It also rewrites the `Host` header from `X-Forwarded-Host` so Forgejo's CSRF check sees the right origin.
 
 2. **Forgejo** itself binds 127.0.0.1:3001 (loopback only, not reachable from outside the container). It's configured with `ENABLE_REVERSE_PROXY_AUTHENTICATION = true` + `REVERSE_PROXY_AUTHENTICATION_USER = X-Openhost-User`, so a stamped header is treated as a logged-in session. `ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true` means the `operator` user is auto-created on the first owner request — that user gets ID 1, which Forgejo treats as admin.
 
-`REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.1/32` means Forgejo only honors the header when it comes from the auth-proxy on loopback. The auth-proxy strips any inbound `X-Openhost-User` header on every request, so a hostile client can't inject auth by setting it themselves.
+`REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.1/32` means Forgejo only honors the header when it comes from the auth-proxy on loopback. The auth-proxy strips any inbound `X-Openhost-User` and `X-OpenHost-Is-Owner` headers before forwarding, as defence in depth. The router itself strips all client-supplied `X-OpenHost-*` headers before forwarding to apps, so the `X-OpenHost-Is-Owner` header is unforgeable.
 
-Anonymous visitors (no cookie) get the request passed through unchanged. Forgejo sees no auth-proxy header and falls through to its normal session/password flow — invited users log in at `/user/login` like on any vanilla forge.
+Non-owner visitors (no `X-OpenHost-Is-Owner` header) get the request passed through unchanged. Forgejo sees no auth-proxy header and falls through to its normal session/password flow — invited users log in at `/user/login` like on any vanilla forge.
 
 ## Deploying
 
@@ -68,7 +68,7 @@ $OPENHOST_APP_DATA_DIR/forgejo/
 
 ## Files
 
-- `Dockerfile` — extends the official Forgejo v14 image with python3 + py3-pyjwt + py3-requests for the auth-proxy.
+- `Dockerfile` — extends the official Forgejo v14 image with python3 + bash for the auth-proxy.
 - `start.sh` — sets the env-var config and starts both auth-proxy and Forgejo.
-- `auth_proxy.py` — the SSO sidecar. Reads `zone_auth` cookie, verifies via JWKS, stamps `X-Openhost-User: operator` for the owner, otherwise passes through unchanged. Also rewrites Host from X-Forwarded-Host.
+- `auth_proxy.py` — the SSO sidecar. Reads the router's `X-OpenHost-Is-Owner` header, stamps `X-Openhost-User: operator` for the owner, otherwise passes through unchanged. Also rewrites Host from X-Forwarded-Host.
 - `openhost.toml` — OpenHost manifest. `public_paths = ["/"]` so invited users can reach the login form; `health_check = "/api/healthz"` for router liveness probes.

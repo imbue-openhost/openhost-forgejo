@@ -10,10 +10,10 @@ port = 3000
 [routing]
 health_check = "/api/healthz"
 # Public so anonymous users can reach the login page (invited users
-# log in with Forgejo-local passwords). The auth-proxy sidecar
-# verifies the OpenHost zone_auth cookie itself and stamps an
-# X-Openhost-User header for the OpenHost owner; everyone else gets
-# Forgejo's normal session/password auth.
+# log in with Forgejo-local passwords). The auth-proxy sidecar reads
+# the router's X-OpenHost-Is-Owner header and stamps X-Openhost-User
+# for the OpenHost owner; everyone else gets Forgejo's normal
+# session/password auth.
 public_paths = ["/"]
 
 [resources]
