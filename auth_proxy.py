@@ -3,14 +3,18 @@
 Sits between the OpenHost router and Forgejo.  When the router stamps
 ``X-OpenHost-Is-Owner: true`` on the inbound request (meaning the
 visitor holds a valid session), this proxy adds
-``X-Openhost-User: operator`` so Forgejo's reverse-proxy auth treats
-the visitor as the ``operator`` admin account.
+``X-Openhost-User: <owner>`` so Forgejo's reverse-proxy auth treats the
+visitor as that account.  ``<owner>`` is the OpenHost owner's real
+username (``OPENHOST_OWNER_USERNAME``), so they appear under their own
+identity instead of a generic shared account; it falls back to
+``operator`` when that value is missing, malformed, or reserved by
+Forgejo (see ``_resolve_owner_username``).
 
 Forgejo is configured with REVERSE_PROXY_AUTHENTICATION_USER set to
 ``X-Openhost-User``, so a valid stamped header authenticates the
-visitor as Forgejo's ``operator`` user.  On the first such request,
-Forgejo auto-creates the account (ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
-= true), which becomes user ID 1 and therefore admin.
+visitor as that Forgejo user.  On the first such request, Forgejo
+auto-creates the account (ENABLE_REVERSE_PROXY_AUTO_REGISTRATION =
+true), which becomes user ID 1 and therefore admin.
 
 Visitors who are not the owner get the request passed through with
 NO ``X-Openhost-User`` header.  Forgejo then falls back to its normal
@@ -47,6 +51,7 @@ from __future__ import annotations
 import http.client
 import logging
 import os
+import re
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,6 +59,55 @@ from typing import AbstractSet, Iterable
 
 OWNER_HEADER_NAME = "X-OpenHost-Is-Owner"
 AUTH_HEADER_NAME = "X-Openhost-User"
+
+# Forgejo username we map the OpenHost owner to when no usable OpenHost
+# username is available.  Forgejo reserves ``admin`` as a system name, so
+# we cannot use that; ``operator`` is a safe, valid fallback.
+FALLBACK_OWNER_USERNAME = "operator"
+
+# Names Forgejo reserves / refuses for normal accounts.  Mapping the
+# owner to one of these would make reverse-proxy auto-registration fail,
+# so we fall back instead.
+RESERVED_USERNAMES = frozenset(
+    {"admin", "ghost", "user", "me", "attachments", "assets", "explore", "issues", "pulls"}
+)
+
+# Forgejo usernames: alphanumeric plus -, _, . — must start/end with an
+# alphanumeric and not look like a reserved/path-like token.  This mirrors
+# Forgejo's own validation closely enough that anything we accept here will
+# be accepted by reverse-proxy auto-registration.
+_VALID_USERNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,38}[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
+
+
+def _resolve_owner_username() -> str:
+    """Return the Forgejo username to auto-log the OpenHost owner in as.
+
+    Uses the OpenHost-provided owner username (``OPENHOST_OWNER_USERNAME``)
+    so the visitor shows up under their real OpenHost identity rather than a
+    generic shared account.  Falls back to ``operator`` when the value is
+    missing, malformed, or reserved by Forgejo so auto-registration can't
+    break.
+    """
+    raw = os.environ.get("OPENHOST_OWNER_USERNAME", "").strip()
+    if not raw:
+        return FALLBACK_OWNER_USERNAME
+    if not _VALID_USERNAME_RE.match(raw):
+        log_target = logging.getLogger(__name__)
+        log_target.warning(
+            "OPENHOST_OWNER_USERNAME=%r is not a valid Forgejo username; "
+            "falling back to %r",
+            raw,
+            FALLBACK_OWNER_USERNAME,
+        )
+        return FALLBACK_OWNER_USERNAME
+    if raw.lower() in RESERVED_USERNAMES:
+        logging.getLogger(__name__).warning(
+            "OPENHOST_OWNER_USERNAME=%r is reserved by Forgejo; falling back to %r",
+            raw,
+            FALLBACK_OWNER_USERNAME,
+        )
+        return FALLBACK_OWNER_USERNAME
+    return raw
 # Headers that must not be forwarded hop-by-hop (RFC 7230 §6.1) plus a few
 # extras where we control the forwarding meaning.
 HOP_BY_HOP_HEADERS = frozenset(
@@ -86,6 +140,11 @@ logging.basicConfig(
     format="[auth-proxy] %(asctime)s %(levelname)s %(message)s",
 )
 log = logging.getLogger("auth_proxy")
+
+# The Forgejo username the OpenHost owner is auto-logged in as.  Resolved
+# once at startup from OPENHOST_OWNER_USERNAME (with a safe fallback).
+OWNER_USERNAME = _resolve_owner_username()
+log.info("Mapping OpenHost owner to Forgejo username %r", OWNER_USERNAME)
 
 
 def _strip_headers(
@@ -211,12 +270,15 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             explicit_host_set = True
 
         if is_owner:
-            # ``operator`` is the Forgejo username we map the OpenHost
-            # owner to.  Forgejo reserves ``admin`` as a system name, so
-            # we cannot use that.  The user is auto-created on first
-            # owner request via ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
-            # and ends up as user ID 1 (the Forgejo admin).
-            cleaned_headers.append((AUTH_HEADER_NAME, "operator"))
+            # Map the OpenHost owner to their real OpenHost username
+            # (OWNER_USERNAME, resolved from OPENHOST_OWNER_USERNAME) so
+            # they appear under their own identity rather than a generic
+            # shared account.  Forgejo reserves ``admin`` as a system
+            # name, so a reserved/invalid value falls back to
+            # ``operator``.  The user is auto-created on first owner
+            # request via ENABLE_REVERSE_PROXY_AUTO_REGISTRATION and ends
+            # up as user ID 1 (the Forgejo admin).
+            cleaned_headers.append((AUTH_HEADER_NAME, OWNER_USERNAME))
 
         # Reject chunked (and any other non-identity) transfer encoding
         # outright.  We buffer the body into a new Content-Length request;

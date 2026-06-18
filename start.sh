@@ -165,10 +165,11 @@ fi
 # ---------------------------------------------------------------------------
 # Start the auth-proxy sidecar.
 # The proxy reads the router-stamped `X-OpenHost-Is-Owner: true`
-# header and, when present, adds `X-Openhost-User: operator` so
-# Forgejo's reverse-proxy auth recognises the visitor as the admin.
-# Non-owner traffic falls through to Forgejo's normal session/password
-# auth.
+# header and, when present, adds `X-Openhost-User: <owner>` (the
+# OpenHost owner's real username from OPENHOST_OWNER_USERNAME, falling
+# back to `operator`) so Forgejo's reverse-proxy auth recognises the
+# visitor as the admin.  Non-owner traffic falls through to Forgejo's
+# normal session/password auth.
 # ---------------------------------------------------------------------------
 # The auth proxy uses only stdlib modules (no venv needed).
 python3 /app/auth_proxy.py &
