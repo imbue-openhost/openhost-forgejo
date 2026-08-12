@@ -1,7 +1,7 @@
-Forgejo self-hosted Git forge for OpenHost. Single Docker container, with
+Forgejo self-hosted Git forge for Cloud in a Bottle. Single Docker container, with
 two authentication paths:
 
-- **Owner**: silently logged in as Forgejo admin (`operator` user) via OpenHost SSO. No password to manage, no login form to fill in.
+- **Owner**: silently logged in as Forgejo admin (`operator` user) via Cloud in a Bottle SSO. No password to manage, no login form to fill in.
 - **Invited users**: log in with a Forgejo-local password. The admin creates their account from Site Administration → User Accounts → Create Account.
 
 Walk-in registrations at `/user/sign_up` are disabled. Public repos remain
@@ -11,7 +11,7 @@ browsable without login (`REQUIRE_SIGNIN_VIEW=false`).
 
 The container runs two processes side by side:
 
-1. **`auth_proxy.py`** binds the public port (3000) and is what the OpenHost router talks to. When the router stamps `X-OpenHost-Is-Owner: true` on the request (meaning the visitor holds a valid session), the proxy adds an `X-Openhost-User: operator` header on the upstream request to Forgejo. It also rewrites the `Host` header from `X-Forwarded-Host` so Forgejo's CSRF check sees the right origin.
+1. **`auth_proxy.py`** binds the public port (3000) and is what the Cloud in a Bottle router talks to. When the router stamps `X-OpenHost-Is-Owner: true` on the request (meaning the visitor holds a valid session), the proxy adds an `X-Openhost-User: operator` header on the upstream request to Forgejo. It also rewrites the `Host` header from `X-Forwarded-Host` so Forgejo's CSRF check sees the right origin.
 
 2. **Forgejo** itself binds 127.0.0.1:3001 (loopback only, not reachable from outside the container). It's configured with `ENABLE_REVERSE_PROXY_AUTHENTICATION = true` + `REVERSE_PROXY_AUTHENTICATION_USER = X-Openhost-User`, so a stamped header is treated as a logged-in session. `ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true` means the `operator` user is auto-created on the first owner request — that user gets ID 1, which Forgejo treats as admin.
 
@@ -21,15 +21,15 @@ Non-owner visitors (no `X-OpenHost-Is-Owner` header) get the request passed thro
 
 ## Deploying
 
-Deploy via the OpenHost router dashboard — point it at this repo. The app will be available at `{app_name}.{zone_domain}` (e.g. `forgejo.zack.host.imbue.com`).
+Deploy via the Cloud in a Bottle router dashboard — point it at this repo. The app will be available at `{app_name}.{zone_domain}` (e.g. `forgejo.zack.host.imbue.com`).
 
-First request from the OpenHost owner triggers the admin-account auto-creation. No password file is generated; there's nothing to copy out of the container.
+First request from the Cloud in a Bottle owner triggers the admin-account auto-creation. No password file is generated; there's nothing to copy out of the container.
 
 ## Adding users
 
 Walk-in `POST /user/sign_up` returns 403 by design. To add users:
 
-1. Visit `forgejo.zone` as the OpenHost owner. You'll be silently logged in as `operator` with admin rights.
+1. Visit `forgejo.zone` as the Cloud in a Bottle owner. You'll be silently logged in as `operator` with admin rights.
 2. Go to **Site Administration → User Accounts → Create User Account**.
 3. Either:
    - **Set a password directly** for the new user and hand it to them over a secure channel (Slack, Signal, etc.). They can change it on first login under their user settings.
@@ -46,7 +46,7 @@ For per-repository collaborators, the owner can also add users by email from the
 ## Caveats
 
 - **Forgejo reserves `admin`.** That's why the owner is mapped to `operator`, not `admin`. Both behave identically (user ID 1 is always admin in Forgejo). The username is hardcoded in `auth_proxy.py`.
-- **One OpenHost owner = one Forgejo admin user.** If you want multiple admins, log in via SSO once to auto-create `operator`, then promote other Forgejo accounts to admin via Site Administration → Users → Edit → "Set as administrator".
+- **One Cloud in a Bottle owner = one Forgejo admin user.** If you want multiple admins, log in via SSO once to auto-create `operator`, then promote other Forgejo accounts to admin via Site Administration → Users → Edit → "Set as administrator".
 - **No SMTP.** Forgejo's built-in email features (activation links, password reset, repo collab invites) need SMTP configured separately. Without it you fall back to manual password handoffs.
 - **No SSH.** `DISABLE_SSH = true`, so git operations go over HTTPS only. Authenticate with personal access tokens rather than SSH keys (Settings → Applications → Generate New Token).
 
@@ -71,4 +71,4 @@ $OPENHOST_APP_DATA_DIR/forgejo/
 - `Dockerfile` — extends the official Forgejo v14 image with python3 + bash for the auth-proxy.
 - `start.sh` — sets the env-var config and starts both auth-proxy and Forgejo.
 - `auth_proxy.py` — the SSO sidecar. Reads the router's `X-OpenHost-Is-Owner` header, stamps `X-Openhost-User: operator` for the owner, otherwise passes through unchanged. Also rewrites Host from X-Forwarded-Host.
-- `openhost.toml` — OpenHost manifest. `public_paths = ["/"]` so invited users can reach the login form; `health_check = "/api/healthz"` for router liveness probes.
+- `openhost.toml` — Cloud in a Bottle manifest. `public_paths = ["/"]` so invited users can reach the login form; `health_check = "/api/healthz"` for router liveness probes.
