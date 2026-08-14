@@ -1,7 +1,7 @@
 [app]
 name = "forgejo"
 version = "0.2.0"
-description = "Forgejo code hosting with OpenHost SSO admin and password auth for invited users"
+description = "Forgejo code hosting with Cloud in a Bottle SSO admin and password auth for invited users"
 
 [runtime.container]
 image = "Dockerfile"
