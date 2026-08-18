@@ -72,3 +72,7 @@ $OPENHOST_APP_DATA_DIR/forgejo/
 - `start.sh` — sets the env-var config and starts both auth-proxy and Forgejo.
 - `auth_proxy.py` — the SSO sidecar. Reads the router's `X-OpenHost-Is-Owner` header, stamps `X-Openhost-User: operator` for the owner, otherwise passes through unchanged. Also rewrites Host from X-Forwarded-Host.
 - `openhost.toml` — Cloud in a Bottle manifest. `public_paths = ["/"]` so invited users can reach the login form; `health_check = "/api/healthz"` for router liveness probes.
+
+## License
+
+Forgejo is licensed under the GNU General Public License v3.0 (GPL-3.0). The container image built from this repo is distributed under that license. The packaging files original to this repository are additionally available under the MIT License. See LICENSE and NOTICE for details.
