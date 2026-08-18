@@ -1,78 +1,58 @@
-Forgejo self-hosted Git forge for Cloud in a Bottle. Single Docker container, with
-two authentication paths:
+# bottled-forgejo
 
-- **Owner**: silently logged in as Forgejo admin (`operator` user) via Cloud in a Bottle SSO. No password to manage, no login form to fill in.
-- **Invited users**: log in with a Forgejo-local password. The admin creates their account from Site Administration → User Accounts → Create Account.
+[Forgejo](https://codeberg.org/forgejo/forgejo) is a self-hosted Git forge
+(code hosting, issues, pull requests, wikis). This repository packages it as a
+Cloud in a Bottle app.
 
-Walk-in registrations at `/user/sign_up` are disabled. Public repos remain
-browsable without login (`REQUIRE_SIGNIN_VIEW=false`).
+## What you get
 
-## How the auth flows work
+- Forgejo running on `https://forgejo.<zone>/`.
+- Public landing page: anyone can browse public repos and the explore page.
+- Owner logged in as admin automatically via Cloud in a Bottle SSO.
+- Invited users log in with Forgejo-local passwords (accounts created by the
+  admin).
+- Walk-in registration disabled. New accounts require admin action.
+- Git over HTTPS (SSH disabled). Authenticate with personal access tokens.
+- Issues, pull requests, releases, wikis, webhooks, organizations.
 
-The container runs two processes side by side:
+## Usage
 
-1. **`auth_proxy.py`** binds the public port (3000) and is what the Cloud in a Bottle router talks to. When the router stamps `X-OpenHost-Is-Owner: true` on the request (meaning the visitor holds a valid session), the proxy adds an `X-Openhost-User: operator` header on the upstream request to Forgejo. It also rewrites the `Host` header from `X-Forwarded-Host` so Forgejo's CSRF check sees the right origin.
+Open `https://forgejo.<zone>/`. As the Cloud in a Bottle owner you are logged
+in automatically as the admin user. Your Forgejo username matches your Cloud in
+a Bottle username.
 
-2. **Forgejo** itself binds 127.0.0.1:3001 (loopback only, not reachable from outside the container). It's configured with `ENABLE_REVERSE_PROXY_AUTHENTICATION = true` + `REVERSE_PROXY_AUTHENTICATION_USER = X-Openhost-User`, so a stamped header is treated as a logged-in session. `ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true` means the `operator` user is auto-created on the first owner request — that user gets ID 1, which Forgejo treats as admin.
+To invite collaborators:
 
-`REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.1/32` means Forgejo only honors the header when it comes from the auth-proxy on loopback. The auth-proxy strips any inbound `X-Openhost-User` and `X-OpenHost-Is-Owner` headers before forwarding, as defence in depth. The router itself strips all client-supplied `X-OpenHost-*` headers before forwarding to apps, so the `X-OpenHost-Is-Owner` header is unforgeable.
+1. Go to Site Administration, User Accounts, Create User Account.
+2. Set a temporary password and hand it to the user out of band.
+3. They log in at `/user/login` and change the password in their settings.
 
-Non-owner visitors (no `X-OpenHost-Is-Owner` header) get the request passed through unchanged. Forgejo sees no auth-proxy header and falls through to its normal session/password flow — invited users log in at `/user/login` like on any vanilla forge.
-
-## Deploying
-
-Deploy via the Cloud in a Bottle router dashboard — point it at this repo. The app will be available at `{app_name}.{zone_domain}` (e.g. `forgejo.zack.host.imbue.com`).
-
-First request from the Cloud in a Bottle owner triggers the admin-account auto-creation. No password file is generated; there's nothing to copy out of the container.
-
-## Adding users
-
-Walk-in `POST /user/sign_up` returns 403 by design. To add users:
-
-1. Visit `forgejo.zone` as the Cloud in a Bottle owner. You'll be silently logged in as `operator` with admin rights.
-2. Go to **Site Administration → User Accounts → Create User Account**.
-3. Either:
-   - **Set a password directly** for the new user and hand it to them over a secure channel (Slack, Signal, etc.). They can change it on first login under their user settings.
-   - **Send activation email** (requires SMTP — not configured by this wrapper). The recipient gets a one-time activation link and sets their own password.
-
-If SMTP isn't configured, the manual flow is:
-
-1. Create the user with a temporary password.
-2. Hand them the URL + temp password out of band.
-3. They log in at `https://forgejo.zone/user/login` and change the password in their settings.
-
-For per-repository collaborators, the owner can also add users by email from the repo's **Settings → Collaborators** page (also requires SMTP for email delivery).
+Git operations use HTTPS. Create a personal access token under Settings,
+Applications, then use it as the password when cloning or pushing.
 
 ## Caveats
 
-- **Forgejo reserves `admin`.** That's why the owner is mapped to `operator`, not `admin`. Both behave identically (user ID 1 is always admin in Forgejo). The username is hardcoded in `auth_proxy.py`.
-- **One Cloud in a Bottle owner = one Forgejo admin user.** If you want multiple admins, log in via SSO once to auto-create `operator`, then promote other Forgejo accounts to admin via Site Administration → Users → Edit → "Set as administrator".
-- **No SMTP.** Forgejo's built-in email features (activation links, password reset, repo collab invites) need SMTP configured separately. Without it you fall back to manual password handoffs.
-- **No SSH.** `DISABLE_SSH = true`, so git operations go over HTTPS only. Authenticate with personal access tokens rather than SSH keys (Settings → Applications → Generate New Token).
+- SSH is disabled. Use HTTPS + personal access tokens for git.
+- No SMTP configured. Email features (activation links, password reset,
+  notification delivery) do not work without adding SMTP settings.
+- Walk-in registration returns 403. Accounts must be admin-created.
 
 ## Data
 
-All persistent data lives in `$OPENHOST_APP_DATA_DIR/forgejo/`:
+All persistent data lives under `$OPENHOST_APP_DATA_DIR/`:
 
-```
-$OPENHOST_APP_DATA_DIR/forgejo/
-├── gitea/
-│   ├── forgejo.db              # SQLite: users, repos, issues, etc.
-│   ├── conf/app.ini            # Forgejo's effective config
-│   ├── attachments/, avatars/, …
-├── git/
-│   └── repositories/           # bare git repos
-├── ssh/                        # (unused; SSH disabled)
-└── .secret_key                 # generated on first boot, persisted
-```
+- `gitea/forgejo.db`: SQLite database (users, repos, issues, settings)
+- `gitea/conf/app.ini`: effective configuration
+- `git/repositories/`: bare git repos
+- `.secret_key`: generated on first boot, persisted
 
-## Files
+## Resources
 
-- `Dockerfile` — extends the official Forgejo v14 image with python3 + bash for the auth-proxy.
-- `start.sh` — sets the env-var config and starts both auth-proxy and Forgejo.
-- `auth_proxy.py` — the SSO sidecar. Reads the router's `X-OpenHost-Is-Owner` header, stamps `X-Openhost-User: operator` for the owner, otherwise passes through unchanged. Also rewrites Host from X-Forwarded-Host.
-- `openhost.toml` — Cloud in a Bottle manifest. `public_paths = ["/"]` so invited users can reach the login form; `health_check = "/api/healthz"` for router liveness probes.
+About 512 MB RAM and 0.5 CPU cores.
 
 ## License
 
-Forgejo is licensed under the GNU General Public License v3.0 (GPL-3.0). The container image built from this repo is distributed under that license. The packaging files original to this repository are additionally available under the MIT License. See LICENSE and NOTICE for details.
+Forgejo is licensed under the GNU General Public License v3.0 (GPL-3.0). The
+container image built from this repo is distributed under that license. The
+packaging files original to this repository are additionally available under the
+MIT License. See LICENSE and NOTICE for details.
