@@ -131,8 +131,11 @@ HOP_BY_HOP_HEADERS = frozenset(
 
 # Defence in depth: always strip these from inbound requests so a
 # misconfigured router or direct container access can't inject auth.
+# Also strip Authorization (the platform Bearer token) which Forgejo
+# does not use but logs in access logs when passed as a query param
+# or header, leaking the token.
 ALWAYS_STRIP_HEADERS = frozenset(
-    h.lower() for h in (OWNER_HEADER_NAME, AUTH_HEADER_NAME)
+    h.lower() for h in (OWNER_HEADER_NAME, AUTH_HEADER_NAME, "authorization")
 )
 
 logging.basicConfig(
